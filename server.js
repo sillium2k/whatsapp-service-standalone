@@ -5,19 +5,14 @@ const WhatsAppBot = require('./whatsapp-bot-enhanced');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Enable CORS for all routes - Railway specific configuration
+// Simple CORS configuration for Railway
 app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  
-  // Allow all origins for Railway deployment
-  res.header('Access-Control-Allow-Origin', origin || '*');
+  res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   
-  // Handle preflight requests
   if (req.method === 'OPTIONS') {
-    res.status(200).end();
+    res.sendStatus(200);
     return;
   }
   
@@ -90,72 +85,63 @@ app.post('/start', async (req, res) => {
       return res.status(400).json({ error: 'userId is required' });
     }
 
-    // Railway environment check
-    if (process.env.RAILWAY_ENVIRONMENT && !process.env.PUPPETEER_EXECUTABLE_PATH) {
-      return res.status(503).json({ 
-        success: false, 
-        error: 'Puppeteer not configured for Railway environment. Chrome executable path required.' 
-      });
-    }
-
+    console.log(`🚀 Starting WhatsApp bot for user: ${userId}`);
+    
     // Stop existing bot for this user if any
     if (whatsappBots.has(userId)) {
-      try {
-        await whatsappBots.get(userId).disconnect();
-      } catch (disconnectError) {
-        console.warn('Error disconnecting existing bot:', disconnectError.message);
-      }
+      console.log(`⚠️ Stopping existing bot for ${userId}`);
+      await whatsappBots.get(userId).disconnect();
       whatsappBots.delete(userId);
     }
 
+    // Return immediate response to prevent timeout
+    res.json({ 
+      success: true, 
+      message: 'Bot initialization started',
+      status: 'initializing',
+      userId: userId
+    });
+
+    // Initialize bot asynchronously in background
+    console.log(`🔄 Starting async bot initialization for ${userId}`);
+    initializeBotAsync(userId, webhookUrl, callbackUrl);
+
+  } catch (error) {
+    console.error('Start failed:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Async bot initialization function
+async function initializeBotAsync(userId, webhookUrl, callbackUrl) {
+  try {
+    console.log(`📦 Creating WhatsApp bot instance for ${userId}...`);
+    
     const bot = new WhatsAppBot(userId, {
       webhookUrl,
       callbackUrl: callbackUrl || process.env.SUPABASE_WEBHOOK_URL,
       sessionPath: `./sessions/${userId}`
     });
 
+    // Store bot immediately with initializing status
     whatsappBots.set(userId, bot);
+    console.log(`📝 Bot stored for ${userId} with status: initializing`);
     
-    // Add timeout to prevent Railway from killing the process
-    const initTimeout = setTimeout(() => {
-      console.error(`Bot initialization timeout for user ${userId}`);
-      whatsappBots.delete(userId);
-    }, 30000);
+    // Initialize bot
+    console.log(`🔌 Initializing WhatsApp client for ${userId}...`);
+    await bot.initialize();
     
-    try {
-      await bot.initialize();
-      clearTimeout(initTimeout);
-      
-      const qrCode = await bot.getQRCode();
-      
-      res.json({ 
-        success: true, 
-        message: 'Bot started successfully',
-        status: bot.getStatus(),
-        qrCode: qrCode,
-        userId: userId
-      });
-    } catch (initError) {
-      clearTimeout(initTimeout);
-      whatsappBots.delete(userId);
-      throw initError;
-    }
+    console.log(`✅ Bot successfully initialized for ${userId}`);
+    
   } catch (error) {
-    console.error('Start failed:', error);
+    console.error(`❌ Async bot initialization failed for ${userId}:`, error);
     
-    // Clean up on error
-    if (whatsappBots.has(req.body.userId)) {
-      try {
-        await whatsappBots.get(req.body.userId).disconnect();
-      } catch (cleanupError) {
-        console.warn('Error during cleanup:', cleanupError.message);
-      }
-      whatsappBots.delete(req.body.userId);
+    // Remove failed bot from map
+    if (whatsappBots.has(userId)) {
+      whatsappBots.delete(userId);
     }
-    
-    res.status(500).json({ success: false, error: error.message });
   }
-});
+}
 
 app.post('/stop', async (req, res) => {
   try {
@@ -268,11 +254,9 @@ app.post('/simulate', async (req, res) => {
   }
 });
 
-app.listen(PORT, '0.0.0.0', () => {
+app.listen(PORT, () => {
   console.log(`WhatsApp Service running on port ${PORT}`);
   console.log(`Supabase webhook URL: ${process.env.SUPABASE_WEBHOOK_URL}`);
-  console.log(`Health check available at: http://localhost:${PORT}/health`);
-  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 
 // Graceful shutdown
