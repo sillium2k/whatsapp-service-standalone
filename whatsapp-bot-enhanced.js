@@ -324,6 +324,16 @@ class WhatsAppBot {
       // Make webhook call non-blocking to prevent crashes
       setImmediate(async () => {
         try {
+          const headers = {
+            'Content-Type': 'application/json',
+            'User-Agent': 'WhatsApp-Bot-Enhanced/1.0'
+          };
+          
+          // Add Supabase auth if service role key is available
+          if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
+            headers['Authorization'] = `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`;
+          }
+          
           await axios.post(this.callbackUrl, {
             type: 'connection_status',
             userId: this.userId,
@@ -331,10 +341,7 @@ class WhatsAppBot {
             timestamp: new Date().toISOString()
           }, {
             timeout: 5000,
-            headers: {
-              'Content-Type': 'application/json',
-              'User-Agent': 'WhatsApp-Bot-Enhanced/1.0'
-            }
+            headers
           });
         } catch (error) {
           console.warn(`Failed to notify status change for user ${this.userId}:`, error.message);
@@ -348,6 +355,16 @@ class WhatsAppBot {
       // Make webhook call non-blocking to prevent crashes
       setImmediate(async () => {
         try {
+          const headers = {
+            'Content-Type': 'application/json',
+            'User-Agent': 'WhatsApp-Bot-Enhanced/1.0'
+          };
+          
+          // Add Supabase auth if service role key is available
+          if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
+            headers['Authorization'] = `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`;
+          }
+          
           await axios.post(this.callbackUrl, {
             type: 'qr_code',
             userId: this.userId,
@@ -355,10 +372,7 @@ class WhatsAppBot {
             timestamp: new Date().toISOString()
           }, {
             timeout: 5000,
-            headers: {
-              'Content-Type': 'application/json',
-              'User-Agent': 'WhatsApp-Bot-Enhanced/1.0'
-            }
+            headers
           });
         } catch (error) {
           console.warn(`Failed to notify QR code for user ${this.userId}:`, error.message);
