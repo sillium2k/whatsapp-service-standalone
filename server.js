@@ -77,105 +77,48 @@ app.get('/status/:userId?', (req, res) => {
   }
 });
 
-app.post('/start', (req, res) => {
-  // Extract data first
-  const userId = req.body?.userId;
-  const webhookUrl = req.body?.webhookUrl;
-  const callbackUrl = req.body?.callbackUrl;
-  
-  // Validate and respond IMMEDIATELY - no other operations
-  if (!userId) {
-    res.status(400).json({ error: 'userId is required' });
-    return;
-  }
+app.post('/start', async (req, res) => {
+  try {
+    const { userId, webhookUrl, callbackUrl } = req.body;
+    
+    if (!userId) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
 
-  // Send response FIRST - absolutely nothing else before this
-  res.json({ 
-    success: true, 
-    message: 'Bot initialization started',
-    status: 'initializing',
-    userId: userId
-  });
-
-  // Queue background work for next tick
-  process.nextTick(() => {
     console.log(`🚀 Starting WhatsApp bot for user: ${userId}`);
     
-    // All work happens in next tick - after response is fully sent
-    setImmediate(() => {
-      try {
-        // Stop existing bot for this user if any
-        if (whatsappBots.has(userId)) {
-          console.log(`⚠️ Stopping existing bot for ${userId}`);
-          const existingBot = whatsappBots.get(userId);
-          whatsappBots.delete(userId);
-          
-          // Disconnect in background without waiting
-          existingBot.disconnect().catch(err => 
-            console.warn(`Failed to disconnect existing bot for ${userId}:`, err.message)
-          );
-        }
+    // Stop existing bot for this user if any
+    if (whatsappBots.has(userId)) {
+      console.log(`⚠️ Stopping existing bot for ${userId}`);
+      await whatsappBots.get(userId).disconnect();
+      whatsappBots.delete(userId);
+    }
 
-        // Initialize bot asynchronously in background
-        console.log(`🔄 Starting async bot initialization for ${userId}`);
-        initializeBotAsync(userId, webhookUrl, callbackUrl).catch(err => {
-          console.error(`Failed to start async initialization for ${userId}:`, err.message);
-        });
-      } catch (error) {
-        console.error(`Error in background start process for ${userId}:`, error);
-      }
-    });
-  });
-});
-
-// Async bot initialization function
-async function initializeBotAsync(userId, webhookUrl, callbackUrl) {
-  try {
-    console.log(`📦 Creating WhatsApp bot instance for ${userId}...`);
-    
     const bot = new WhatsAppBot(userId, {
       webhookUrl,
       callbackUrl: callbackUrl || process.env.SUPABASE_WEBHOOK_URL,
       sessionPath: `./sessions/${userId}`
     });
 
-    // Store bot immediately with initializing status
     whatsappBots.set(userId, bot);
-    console.log(`📝 Bot stored for ${userId} with status: initializing`);
     
-    // Initialize bot with timeout protection
-    console.log(`🔌 Initializing WhatsApp client for ${userId}...`);
+    await bot.initialize();
     
-    // Wrap initialization in a timeout to prevent hanging
-    const initPromise = bot.initialize();
-    const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('Bot initialization timeout')), 360000); // 6 minutes
+    const qrCode = await bot.getQRCode();
+    
+    res.json({ 
+      success: true, 
+      message: 'Bot started successfully',
+      status: bot.getStatus(),
+      qrCode: qrCode,
+      userId: userId
     });
-    
-    await Promise.race([initPromise, timeoutPromise]);
-    
-    console.log(`✅ Bot successfully initialized for ${userId}`);
-    
   } catch (error) {
-    console.error(`❌ Async bot initialization failed for ${userId}:`, error.message);
-    
-    // Clean up failed bot
-    if (whatsappBots.has(userId)) {
-      const failedBot = whatsappBots.get(userId);
-      whatsappBots.delete(userId);
-      
-      // Try to disconnect gracefully
-      try {
-        await failedBot.disconnect();
-      } catch (disconnectError) {
-        console.warn(`Failed to disconnect failed bot for ${userId}:`, disconnectError.message);
-      }
-    }
-    
-    // Don't let bot failures crash the server
-    // Continue running for other users
+    console.error('Start failed:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
-}
+});
+
 
 app.post('/stop', async (req, res) => {
   try {
