@@ -77,39 +77,40 @@ app.get('/status/:userId?', (req, res) => {
   }
 });
 
-app.post('/start', async (req, res) => {
-  try {
-    const { userId, webhookUrl, callbackUrl } = req.body;
-    
-    if (!userId) {
-      return res.status(400).json({ error: 'userId is required' });
-    }
-
-    console.log(`🚀 Starting WhatsApp bot for user: ${userId}`);
-    
-    // Stop existing bot for this user if any
-    if (whatsappBots.has(userId)) {
-      console.log(`⚠️ Stopping existing bot for ${userId}`);
-      await whatsappBots.get(userId).disconnect();
-      whatsappBots.delete(userId);
-    }
-
-    // Return immediate response to prevent timeout
-    res.json({ 
-      success: true, 
-      message: 'Bot initialization started',
-      status: 'initializing',
-      userId: userId
-    });
-
-    // Initialize bot asynchronously in background
-    console.log(`🔄 Starting async bot initialization for ${userId}`);
-    initializeBotAsync(userId, webhookUrl, callbackUrl);
-
-  } catch (error) {
-    console.error('Start failed:', error);
-    res.status(500).json({ success: false, error: error.message });
+app.post('/start', (req, res) => {
+  const { userId, webhookUrl, callbackUrl } = req.body;
+  
+  if (!userId) {
+    return res.status(400).json({ error: 'userId is required' });
   }
+
+  console.log(`🚀 Starting WhatsApp bot for user: ${userId}`);
+  
+  // Stop existing bot for this user if any
+  if (whatsappBots.has(userId)) {
+    console.log(`⚠️ Stopping existing bot for ${userId}`);
+    const existingBot = whatsappBots.get(userId);
+    whatsappBots.delete(userId);
+    
+    // Disconnect in background without waiting
+    existingBot.disconnect().catch(err => 
+      console.warn(`Failed to disconnect existing bot for ${userId}:`, err.message)
+    );
+  }
+
+  // Return immediate response to prevent timeout
+  res.json({ 
+    success: true, 
+    message: 'Bot initialization started',
+    status: 'initializing',
+    userId: userId
+  });
+
+  // Initialize bot asynchronously in background
+  console.log(`🔄 Starting async bot initialization for ${userId}`);
+  initializeBotAsync(userId, webhookUrl, callbackUrl).catch(err => {
+    console.error(`Failed to start async initialization for ${userId}:`, err.message);
+  });
 });
 
 // Async bot initialization function
