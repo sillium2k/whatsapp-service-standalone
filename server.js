@@ -186,6 +186,34 @@ app.get('/qr/:userId', async (req, res) => {
   }
 });
 
+// QR Code as image endpoint for direct display
+app.get('/qr/:userId/image', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const bot = whatsappBots.get(userId);
+    
+    if (!bot) {
+      return res.status(404).json({ error: 'Bot not found for user' });
+    }
+
+    const qrCodeDataURL = bot.getQRCodeDataURL();
+    if (!qrCodeDataURL) {
+      return res.status(404).json({ error: 'QR code not available' });
+    }
+
+    // Extract base64 data and convert to buffer
+    const base64Data = bot.getCleanBase64QR();
+    const imageBuffer = Buffer.from(base64Data, 'base64');
+    
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.send(imageBuffer);
+  } catch (error) {
+    console.error('QR image fetch failed:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.post('/simulate', async (req, res) => {
   try {
     const { userId, testUrl, webhookUrl } = req.body;

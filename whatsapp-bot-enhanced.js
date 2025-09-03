@@ -287,9 +287,19 @@ class WhatsAppBot {
 
         console.log(`Dispatching link to user webhook for ${this.userId}:`, payload);
 
+        const headers = {
+          'Content-Type': 'application/json',
+          'User-Agent': 'WhatsApp-Bot-Enhanced/1.0'
+        };
+        
+        // Add optional webhook authentication
+        if (process.env.WEBHOOK_SECRET) {
+          headers['Authorization'] = `Bearer ${process.env.WEBHOOK_SECRET}`;
+        }
+
         const response = await axios.post(this.webhookUrl, payload, {
           timeout: 10000,
-          headers: { 'Content-Type': 'application/json' }
+          headers
         });
 
         console.log(`Link dispatched to user webhook successfully for ${this.userId}`);
@@ -382,6 +392,19 @@ class WhatsAppBot {
   }
 
   async getQRCode() {
+    return this.qrCode;
+  }
+
+  // Get clean base64 QR code without data URL prefix
+  getCleanBase64QR() {
+    if (!this.qrCode) return null;
+    
+    // Remove data URL prefix if present
+    return this.qrCode.replace(/^data:image\/png;base64,/, '');
+  }
+
+  // Get QR code as data URL (for direct browser display)
+  getQRCodeDataURL() {
     return this.qrCode;
   }
 
