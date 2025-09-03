@@ -5,6 +5,25 @@ const WhatsAppBot = require('./whatsapp-bot-enhanced');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Enable CORS for all routes - Railway specific configuration
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  
+  // Allow all origins for Railway deployment
+  res.header('Access-Control-Allow-Origin', origin || '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
+  }
+  
+  next();
+});
+
 app.use(express.json());
 
 // Store multiple bot instances for different users
@@ -154,6 +173,51 @@ app.get('/qr/:userId', async (req, res) => {
   } catch (error) {
     console.error('QR fetch failed:', error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/simulate', async (req, res) => {
+  try {
+    const { userId, testUrl, webhookUrl } = req.body;
+    
+    if (!userId) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+
+    // Simulate sending a test link to webhook
+    const testPayload = {
+      link: testUrl || 'https://linkedin.com/post/sample-test-url',
+      message: 'This is a test message with a link',
+      timestamp: new Date().toISOString(),
+      group: 'Test Group',
+      sender: 'Test User',
+      userId: userId
+    };
+
+    if (webhookUrl) {
+      try {
+        const response = await fetch(webhookUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(testPayload)
+        });
+        
+        console.log(`Test link sent to webhook: ${webhookUrl} - Status: ${response.status}`);
+      } catch (error) {
+        console.error('Failed to send test link to webhook:', error);
+      }
+    }
+
+    res.json({ 
+      success: true, 
+      message: 'Test link simulation completed',
+      payload: testPayload
+    });
+  } catch (error) {
+    console.error('Simulate failed:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
