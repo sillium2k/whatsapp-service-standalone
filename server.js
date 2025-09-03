@@ -84,21 +84,7 @@ app.post('/start', (req, res) => {
     return res.status(400).json({ error: 'userId is required' });
   }
 
-  console.log(`🚀 Starting WhatsApp bot for user: ${userId}`);
-  
-  // Stop existing bot for this user if any
-  if (whatsappBots.has(userId)) {
-    console.log(`⚠️ Stopping existing bot for ${userId}`);
-    const existingBot = whatsappBots.get(userId);
-    whatsappBots.delete(userId);
-    
-    // Disconnect in background without waiting
-    existingBot.disconnect().catch(err => 
-      console.warn(`Failed to disconnect existing bot for ${userId}:`, err.message)
-    );
-  }
-
-  // Return immediate response to prevent timeout
+  // Send response IMMEDIATELY before doing anything else
   res.json({ 
     success: true, 
     message: 'Bot initialization started',
@@ -106,11 +92,33 @@ app.post('/start', (req, res) => {
     userId: userId
   });
 
-  // Initialize bot asynchronously in background
-  console.log(`🔄 Starting async bot initialization for ${userId}`);
-  initializeBotAsync(userId, webhookUrl, callbackUrl).catch(err => {
-    console.error(`Failed to start async initialization for ${userId}:`, err.message);
-  });
+  // Everything else happens after response is sent
+  console.log(`🚀 Starting WhatsApp bot for user: ${userId}`);
+  
+  // Use setTimeout to ensure response is sent first
+  setTimeout(() => {
+    try {
+      // Stop existing bot for this user if any
+      if (whatsappBots.has(userId)) {
+        console.log(`⚠️ Stopping existing bot for ${userId}`);
+        const existingBot = whatsappBots.get(userId);
+        whatsappBots.delete(userId);
+        
+        // Disconnect in background without waiting
+        existingBot.disconnect().catch(err => 
+          console.warn(`Failed to disconnect existing bot for ${userId}:`, err.message)
+        );
+      }
+
+      // Initialize bot asynchronously in background
+      console.log(`🔄 Starting async bot initialization for ${userId}`);
+      initializeBotAsync(userId, webhookUrl, callbackUrl).catch(err => {
+        console.error(`Failed to start async initialization for ${userId}:`, err.message);
+      });
+    } catch (error) {
+      console.error(`Error in background start process for ${userId}:`, error);
+    }
+  }, 0);
 });
 
 // Async bot initialization function
