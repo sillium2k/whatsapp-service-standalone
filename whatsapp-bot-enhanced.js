@@ -25,8 +25,9 @@ class WhatsAppBot {
       this.status = 'initializing';
       await this.notifyStatusChange();
 
-      this.browser = await puppeteer.launch({
-        headless: true,
+      // Railway/Docker optimized Puppeteer configuration
+      const puppeteerOptions = {
+        headless: 'new',
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',
@@ -34,9 +35,41 @@ class WhatsAppBot {
           '--disable-accelerated-2d-canvas',
           '--no-first-run',
           '--no-zygote',
-          '--disable-gpu'
+          '--disable-gpu',
+          '--disable-background-timer-throttling',
+          '--disable-backgrounding-occluded-windows',
+          '--disable-renderer-backgrounding',
+          '--disable-features=TranslateUI',
+          '--disable-ipc-flooding-protection',
+          '--disable-extensions',
+          '--disable-default-apps',
+          '--disable-sync',
+          '--disable-translate',
+          '--disable-background-networking',
+          '--disable-background-timer-throttling',
+          '--disable-client-side-phishing-detection',
+          '--disable-component-update',
+          '--disable-domain-reliability',
+          '--disable-features=AudioServiceOutOfProcess',
+          '--disable-hang-monitor',
+          '--disable-popup-blocking',
+          '--disable-prompt-on-repost',
+          '--disable-web-security',
+          '--metrics-recording-only',
+          '--no-default-browser-check',
+          '--no-experiments',
+          '--password-store=basic',
+          '--use-mock-keychain',
+          '--single-process'
         ]
-      });
+      };
+
+      // Add executable path for Railway if available
+      if (process.env.RAILWAY_ENVIRONMENT) {
+        puppeteerOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable';
+      }
+
+      this.browser = await puppeteer.launch(puppeteerOptions);
 
       this.page = await this.browser.newPage();
       

@@ -90,9 +90,21 @@ app.post('/start', async (req, res) => {
       return res.status(400).json({ error: 'userId is required' });
     }
 
+    // Railway environment check
+    if (process.env.RAILWAY_ENVIRONMENT && !process.env.PUPPETEER_EXECUTABLE_PATH) {
+      return res.status(503).json({ 
+        success: false, 
+        error: 'Puppeteer not configured for Railway environment. Chrome executable path required.' 
+      });
+    }
+
     // Stop existing bot for this user if any
     if (whatsappBots.has(userId)) {
-      await whatsappBots.get(userId).disconnect();
+      try {
+        await whatsappBots.get(userId).disconnect();
+      } catch (disconnectError) {
+        console.warn('Error disconnecting existing bot:', disconnectError.message);
+      }
       whatsappBots.delete(userId);
     }
 
@@ -104,19 +116,43 @@ app.post('/start', async (req, res) => {
 
     whatsappBots.set(userId, bot);
     
-    await bot.initialize();
+    // Add timeout to prevent Railway from killing the process
+    const initTimeout = setTimeout(() => {
+      console.error(`Bot initialization timeout for user ${userId}`);
+      whatsappBots.delete(userId);
+    }, 30000);
     
-    const qrCode = await bot.getQRCode();
-    
-    res.json({ 
-      success: true, 
-      message: 'Bot started successfully',
-      status: bot.getStatus(),
-      qrCode: qrCode,
-      userId: userId
-    });
+    try {
+      await bot.initialize();
+      clearTimeout(initTimeout);
+      
+      const qrCode = await bot.getQRCode();
+      
+      res.json({ 
+        success: true, 
+        message: 'Bot started successfully',
+        status: bot.getStatus(),
+        qrCode: qrCode,
+        userId: userId
+      });
+    } catch (initError) {
+      clearTimeout(initTimeout);
+      whatsappBots.delete(userId);
+      throw initError;
+    }
   } catch (error) {
     console.error('Start failed:', error);
+    
+    // Clean up on error
+    if (whatsappBots.has(req.body.userId)) {
+      try {
+        await whatsappBots.get(req.body.userId).disconnect();
+      } catch (cleanupError) {
+        console.warn('Error during cleanup:', cleanupError.message);
+      }
+      whatsappBots.delete(req.body.userId);
+    }
+    
     res.status(500).json({ success: false, error: error.message });
   }
 });
