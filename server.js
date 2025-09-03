@@ -43,6 +43,17 @@ app.get('/', (req, res) => {
   });
 });
 
+// Health check endpoint for Railway
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    memory: process.memoryUsage(),
+    port: PORT
+  });
+});
+
 app.get('/status/:userId?', (req, res) => {
   const { userId } = req.params;
   
@@ -221,9 +232,11 @@ app.post('/simulate', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`WhatsApp Service running on port ${PORT}`);
   console.log(`Supabase webhook URL: ${process.env.SUPABASE_WEBHOOK_URL}`);
+  console.log(`Health check available at: http://localhost:${PORT}/health`);
+  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 
 // Graceful shutdown
