@@ -136,19 +136,37 @@ async function initializeBotAsync(userId, webhookUrl, callbackUrl) {
     whatsappBots.set(userId, bot);
     console.log(`📝 Bot stored for ${userId} with status: initializing`);
     
-    // Initialize bot
+    // Initialize bot with timeout protection
     console.log(`🔌 Initializing WhatsApp client for ${userId}...`);
-    await bot.initialize();
+    
+    // Wrap initialization in a timeout to prevent hanging
+    const initPromise = bot.initialize();
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Bot initialization timeout')), 360000); // 6 minutes
+    });
+    
+    await Promise.race([initPromise, timeoutPromise]);
     
     console.log(`✅ Bot successfully initialized for ${userId}`);
     
   } catch (error) {
-    console.error(`❌ Async bot initialization failed for ${userId}:`, error);
+    console.error(`❌ Async bot initialization failed for ${userId}:`, error.message);
     
-    // Remove failed bot from map
+    // Clean up failed bot
     if (whatsappBots.has(userId)) {
+      const failedBot = whatsappBots.get(userId);
       whatsappBots.delete(userId);
+      
+      // Try to disconnect gracefully
+      try {
+        await failedBot.disconnect();
+      } catch (disconnectError) {
+        console.warn(`Failed to disconnect failed bot for ${userId}:`, disconnectError.message);
+      }
     }
+    
+    // Don't let bot failures crash the server
+    // Continue running for other users
   }
 }
 
@@ -266,6 +284,17 @@ app.post('/simulate', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`WhatsApp Service running on port ${PORT}`);
   console.log(`Supabase webhook URL: ${process.env.SUPABASE_WEBHOOK_URL}`);
+});
+
+// Global error handlers to prevent server crashes
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+  // Don't exit, keep server running for other users
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  // Don't exit, keep server running for other users
 });
 
 // Graceful shutdown

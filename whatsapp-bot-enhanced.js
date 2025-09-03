@@ -152,7 +152,7 @@ class WhatsAppBot {
     this.status = 'connecting';
     await this.notifyStatusChange();
 
-    const timeout = 120000; // 2 minutes
+    const timeout = 300000; // 5 minutes - increased for Railway environment
     const startTime = Date.now();
     
     while (Date.now() - startTime < timeout) {
@@ -321,31 +321,49 @@ class WhatsAppBot {
 
   async notifyStatusChange() {
     if (this.callbackUrl) {
-      try {
-        await axios.post(this.callbackUrl, {
-          type: 'connection_status',
-          userId: this.userId,
-          status: this.status,
-          timestamp: new Date().toISOString()
-        });
-      } catch (error) {
-        console.error(`Failed to notify status change for user ${this.userId}:`, error.message);
-      }
+      // Make webhook call non-blocking to prevent crashes
+      setImmediate(async () => {
+        try {
+          await axios.post(this.callbackUrl, {
+            type: 'connection_status',
+            userId: this.userId,
+            status: this.status,
+            timestamp: new Date().toISOString()
+          }, {
+            timeout: 5000,
+            headers: {
+              'Content-Type': 'application/json',
+              'User-Agent': 'WhatsApp-Bot-Enhanced/1.0'
+            }
+          });
+        } catch (error) {
+          console.warn(`Failed to notify status change for user ${this.userId}:`, error.message);
+        }
+      });
     }
   }
 
   async notifyQRCode() {
     if (this.callbackUrl && this.qrCode) {
-      try {
-        await axios.post(this.callbackUrl, {
-          type: 'qr_code',
-          userId: this.userId,
-          qrCode: this.qrCode,
-          timestamp: new Date().toISOString()
-        });
-      } catch (error) {
-        console.error(`Failed to notify QR code for user ${this.userId}:`, error.message);
-      }
+      // Make webhook call non-blocking to prevent crashes
+      setImmediate(async () => {
+        try {
+          await axios.post(this.callbackUrl, {
+            type: 'qr_code',
+            userId: this.userId,
+            qrCode: this.qrCode,
+            timestamp: new Date().toISOString()
+          }, {
+            timeout: 5000,
+            headers: {
+              'Content-Type': 'application/json',
+              'User-Agent': 'WhatsApp-Bot-Enhanced/1.0'
+            }
+          });
+        } catch (error) {
+          console.warn(`Failed to notify QR code for user ${this.userId}:`, error.message);
+        }
+      });
     }
   }
 
