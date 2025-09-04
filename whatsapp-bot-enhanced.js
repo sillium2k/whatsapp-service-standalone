@@ -64,7 +64,7 @@ class WhatsAppBot {
     this.client.on('auth_failure', async (msg) => {
       console.error(`Authentication failed for user ${this.userId}:`, msg);
       this.status = 'auth_failed';
-      await this.notifyStatusChange();
+      this.notifyStatusChange().catch(() => {});
     });
   }
 
@@ -73,7 +73,7 @@ class WhatsAppBot {
       console.log(`Initializing WhatsApp client for user ${this.userId}...`);
       
       this.status = 'initializing';
-      await this.notifyStatusChange();
+      this.notifyStatusChange().catch(() => {});
 
       // Start the WhatsApp client in background - don't await
       this.client.initialize().catch(error => {
@@ -87,7 +87,7 @@ class WhatsAppBot {
     } catch (error) {
       console.error(`Failed to start WhatsApp client for user ${this.userId}:`, error);
       this.status = 'error';
-      await this.notifyStatusChange();
+      this.notifyStatusChange().catch(() => {});
       throw error;
     }
   }
@@ -112,7 +112,7 @@ class WhatsAppBot {
       });
       
       this.status = 'qr_ready';
-      await this.notifyStatusChange();
+      this.notifyStatusChange().catch(() => {});
       await this.notifyQRCode();
       
       console.log(`QR code generated and ready for user ${this.userId}`);
@@ -129,7 +129,7 @@ class WhatsAppBot {
       this.qrCode = null; // Clear QR code once connected
       this.qrCodeDataURL = null;
       
-      await this.notifyStatusChange();
+      this.notifyStatusChange().catch(() => {});
       
       console.log(`WhatsApp client ready and connected for user ${this.userId}`);
       
@@ -179,7 +179,7 @@ class WhatsAppBot {
       this.qrCode = null;
       this.qrCodeDataURL = null;
       
-      await this.notifyStatusChange();
+      this.notifyStatusChange().catch(() => {});
       
       console.log(`WhatsApp client disconnected for user ${this.userId}. Reason:`, reason);
       
