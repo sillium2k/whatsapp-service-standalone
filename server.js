@@ -103,9 +103,13 @@ app.post('/start', async (req, res) => {
     whatsappBots.set(userId, bot);
     
     // Start bot initialization in background - don't wait
-    bot.initialize().catch(error => {
-      console.error(`Background initialization failed for user ${userId}:`, error);
-    });
+    (async () => {
+      try {
+        await bot.initialize();
+      } catch (error) {
+        console.error('🔥 Bot init failed:', error);
+      }
+    })();
     
     // Respond immediately with initializing status
     res.json({ 
