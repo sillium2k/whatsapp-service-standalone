@@ -1,7 +1,7 @@
 # Use Node.js 18 with Chromium support
 FROM node:18-bullseye-slim
 
-# Install system dependencies for Puppeteer
+# Install system dependencies for whatsapp-web.js (uses Puppeteer internally)
 RUN apt-get update && apt-get install -y \
     chromium \
     fonts-liberation \
@@ -38,7 +38,7 @@ COPY . .
 # Create required directories
 RUN mkdir -p sessions qr-codes
 
-# Set Puppeteer to use system Chromium
+# Set Puppeteer to use system Chromium (whatsapp-web.js uses Puppeteer internally)
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 

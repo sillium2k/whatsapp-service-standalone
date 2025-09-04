@@ -102,15 +102,17 @@ app.post('/start', async (req, res) => {
 
     whatsappBots.set(userId, bot);
     
-    await bot.initialize();
+    // Start bot initialization in background - don't wait
+    bot.initialize().catch(error => {
+      console.error(`Background initialization failed for user ${userId}:`, error);
+    });
     
-    const qrCode = await bot.getQRCode();
-    
+    // Respond immediately with initializing status
     res.json({ 
       success: true, 
-      message: 'Bot started successfully',
-      status: bot.getStatus(),
-      qrCode: qrCode,
+      message: 'Bot initialization started',
+      status: 'initializing',
+      qrCode: null,
       userId: userId
     });
   } catch (error) {

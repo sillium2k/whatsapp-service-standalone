@@ -1,4 +1,5 @@
-const puppeteer = require('puppeteer');
+const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
+const qrcode = require('qrcode');
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
@@ -6,270 +7,186 @@ const axios = require('axios');
 class WhatsAppBot {
   constructor(userId, options = {}) {
     this.userId = userId;
-    this.browser = null;
-    this.page = null;
     this.connected = false;
     this.status = 'disconnected';
-    this.sessionPath = options.sessionPath || `./sessions/${userId}`;
     this.webhookUrl = options.webhookUrl;
     this.callbackUrl = options.callbackUrl;
     this.processedMessages = new Set();
     this.qrCode = null;
-    this.qrCodePath = `./qr-codes/${userId}-qr.png`;
-  }
-
-  async initialize() {
-    try {
-      console.log(`Launching browser for user ${this.userId}...`);
-      
-      this.status = 'initializing';
-      await this.notifyStatusChange();
-
-      // Railway/Docker optimized Puppeteer configuration
-      const puppeteerOptions = {
+    this.qrCodeDataURL = null;
+    
+    // Create WhatsApp Web client
+    this.client = new Client({
+      authStrategy: new LocalAuth({ 
+        clientId: userId,
+        dataPath: './sessions'
+      }),
+      puppeteer: {
         headless: 'new',
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',
           '--disable-dev-shm-usage',
-          '--disable-accelerated-2d-canvas',
-          '--no-first-run',
-          '--no-zygote',
           '--disable-gpu',
-          '--disable-background-timer-throttling',
-          '--disable-backgrounding-occluded-windows',
-          '--disable-renderer-backgrounding',
-          '--disable-features=TranslateUI',
-          '--disable-ipc-flooding-protection',
-          '--disable-extensions',
-          '--disable-default-apps',
-          '--disable-sync',
-          '--disable-translate',
-          '--disable-background-networking',
-          '--disable-background-timer-throttling',
-          '--disable-client-side-phishing-detection',
-          '--disable-component-update',
-          '--disable-domain-reliability',
-          '--disable-features=AudioServiceOutOfProcess',
-          '--disable-hang-monitor',
-          '--disable-popup-blocking',
-          '--disable-prompt-on-repost',
-          '--disable-web-security',
-          '--metrics-recording-only',
-          '--no-default-browser-check',
-          '--no-experiments',
-          '--password-store=basic',
-          '--use-mock-keychain',
           '--single-process'
         ]
-      };
-
-      // Add executable path for Railway if available
-      if (process.env.RAILWAY_ENVIRONMENT) {
-        puppeteerOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable';
       }
+    });
+    
+    this.setupEventHandlers();
+  }
 
-      this.browser = await puppeteer.launch(puppeteerOptions);
+  setupEventHandlers() {
+    // QR Code event - non-blocking!
+    this.client.on('qr', async (qr) => {
+      console.log(`QR Code received for user ${this.userId}`);
+      await this.handleQRCode(qr);
+    });
 
-      this.page = await this.browser.newPage();
-      
-      await this.page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-      
-      await this.loadSession();
-      
-      console.log(`Navigating to WhatsApp Web for user ${this.userId}...`);
-      await this.page.goto('https://web.whatsapp.com', { waitUntil: 'networkidle2' });
-      
-      await this.waitForConnection();
-      
-      console.log(`WhatsApp Web connected successfully for user ${this.userId}`);
-      this.connected = true;
-      this.status = 'connected';
+    // Ready event - connection established
+    this.client.on('ready', async () => {
+      console.log(`Client is ready for user ${this.userId}!`);
+      await this.handleReady();
+    });
+
+    // Message event - for link detection
+    this.client.on('message', async (message) => {
+      await this.handleMessage(message);
+    });
+
+    // Disconnection event
+    this.client.on('disconnected', async (reason) => {
+      console.log(`Client disconnected for user ${this.userId}:`, reason);
+      await this.handleDisconnected(reason);
+    });
+
+    // Authentication failure
+    this.client.on('auth_failure', async (msg) => {
+      console.error(`Authentication failed for user ${this.userId}:`, msg);
+      this.status = 'auth_failed';
       await this.notifyStatusChange();
+    });
+  }
+
+  async initialize() {
+    try {
+      console.log(`Initializing WhatsApp client for user ${this.userId}...`);
       
-      await this.startMessageMonitoring();
+      this.status = 'initializing';
+      await this.notifyStatusChange();
+
+      // Start the WhatsApp client - this will trigger events
+      await this.client.initialize();
+      
+      console.log(`WhatsApp client initialization started for user ${this.userId}`);
       
     } catch (error) {
-      console.error(`Failed to initialize WhatsApp bot for user ${this.userId}:`, error);
+      console.error(`Failed to initialize WhatsApp client for user ${this.userId}:`, error);
       this.status = 'error';
       await this.notifyStatusChange();
       throw error;
     }
   }
 
-  async loadSession() {
+  async handleQRCode(qr) {
     try {
-      if (fs.existsSync(this.sessionPath)) {
-        console.log(`Loading existing session for user ${this.userId}...`);
-        const sessionData = fs.readFileSync(this.sessionPath, 'utf8');
-        const session = JSON.parse(sessionData);
-        
-        for (const cookie of session.cookies) {
-          await this.page.setCookie(cookie);
+      console.log(`Generating QR code for user ${this.userId}`);
+      
+      // Store raw QR string
+      this.qrCode = qr;
+      
+      // Generate QR code as data URL for display
+      this.qrCodeDataURL = await qrcode.toDataURL(qr, {
+        errorCorrectionLevel: 'M',
+        type: 'image/png',
+        quality: 0.92,
+        margin: 1,
+        color: {
+          dark: '#000000',
+          light: '#FFFFFF'
         }
-        
-        if (session.localStorage) {
-          await this.page.evaluateOnNewDocument((localStorage) => {
-            for (const [key, value] of Object.entries(localStorage)) {
-              window.localStorage.setItem(key, value);
-            }
-          }, session.localStorage);
-        }
-      }
-    } catch (error) {
-      console.log(`No valid session found for user ${this.userId}, will need to scan QR code`);
-    }
-  }
-
-  async saveSession() {
-    try {
-      const cookies = await this.page.cookies();
-      const localStorage = await this.page.evaluate(() => {
-        const items = {};
-        for (let i = 0; i < window.localStorage.length; i++) {
-          const key = window.localStorage.key(i);
-          items[key] = window.localStorage.getItem(key);
-        }
-        return items;
       });
-
-      const session = { cookies, localStorage };
       
-      if (!fs.existsSync(path.dirname(this.sessionPath))) {
-        fs.mkdirSync(path.dirname(this.sessionPath), { recursive: true });
-      }
+      this.status = 'qr_ready';
+      await this.notifyStatusChange();
+      await this.notifyQRCode();
       
-      fs.writeFileSync(this.sessionPath, JSON.stringify(session, null, 2));
-      console.log(`Session saved successfully for user ${this.userId}`);
+      console.log(`QR code generated and ready for user ${this.userId}`);
+      
     } catch (error) {
-      console.error(`Failed to save session for user ${this.userId}:`, error);
+      console.error(`Failed to generate QR code for user ${this.userId}:`, error);
     }
   }
 
-  async waitForConnection() {
-    console.log(`Waiting for WhatsApp connection for user ${this.userId}...`);
-    
-    this.status = 'connecting';
-    await this.notifyStatusChange();
-
-    const timeout = 300000; // 5 minutes - increased for Railway environment
-    const startTime = Date.now();
-    
-    while (Date.now() - startTime < timeout) {
-      try {
-        // Check if QR code is present
-        const qrCode = await this.page.$('[data-ref]');
-        if (qrCode) {
-          console.log(`QR Code detected for user ${this.userId}. Please scan with your phone.`);
-          
-          this.status = 'qr_ready';
-          
-          // Take screenshot of QR code
-          try {
-            // Ensure qr-codes directory exists
-            if (!fs.existsSync('./qr-codes')) {
-              fs.mkdirSync('./qr-codes', { recursive: true });
-            }
-
-            await this.page.screenshot({ 
-              path: this.qrCodePath,
-              clip: await qrCode.boundingBox()
-            });
-            
-            // Convert to base64 for sending to callback
-            const qrBuffer = fs.readFileSync(this.qrCodePath);
-            this.qrCode = `data:image/png;base64,${qrBuffer.toString('base64')}`;
-            
-            console.log(`QR code screenshot saved for user ${this.userId}`);
-            await this.notifyQRCode();
-            
-          } catch (screenshotError) {
-            console.log(`Could not save QR code screenshot for user ${this.userId}`);
-          }
-        }
-        
-        // Check if we're logged in
-        const chatList = await this.page.$('[data-testid="chat-list"]');
-        if (chatList) {
-          console.log(`Successfully connected to WhatsApp Web for user ${this.userId}`);
-          await this.saveSession();
-          this.qrCode = null; // Clear QR code once connected
-          return true;
-        }
-        
-        await this.page.waitForTimeout(2000);
-      } catch (error) {
-        // Continue trying
-      }
-    }
-    
-    throw new Error(`Failed to connect to WhatsApp Web within timeout period for user ${this.userId}`);
-  }
-
-  async startMessageMonitoring() {
-    console.log(`Starting message monitoring for user ${this.userId}...`);
-    
-    // Monitor for new messages
-    this.page.on('response', async (response) => {
-      if (response.url().includes('/app/chat') || response.url().includes('web.whatsapp.com')) {
-        try {
-          await this.checkForNewMessages();
-        } catch (error) {
-          console.error(`Error checking messages for user ${this.userId}:`, error);
-        }
-      }
-    });
-
-    // Initial check
-    await this.checkForNewMessages();
-    
-    // Set up periodic checking
-    this.messageCheckInterval = setInterval(() => {
-      this.checkForNewMessages().catch(console.error);
-    }, 5000); // Check every 5 seconds
-  }
-
-  async checkForNewMessages() {
+  async handleReady() {
     try {
-      // Get all message elements
-      const messages = await this.page.$$('[data-testid="msg-container"]');
+      this.status = 'connected';
+      this.connected = true;
+      this.qrCode = null; // Clear QR code once connected
+      this.qrCodeDataURL = null;
       
-      for (const message of messages) {
-        try {
-          const messageId = await message.evaluate(el => el.getAttribute('data-id'));
-          
-          if (!messageId || this.processedMessages.has(messageId)) {
-            continue;
-          }
-          
-          // Check if message contains links
-          const links = await message.$$eval('a[href]', links => 
-            links
-              .map(link => link.href)
-              .filter(href => href.startsWith('http'))
-          );
-          
-          if (links.length > 0) {
-            console.log(`Found ${links.length} link(s) in message for user ${this.userId}:`, links);
-            
-            // Get message text and sender info
-            const messageText = await message.$eval('[data-testid="conversation-compose-box-input"]', el => el.textContent).catch(() => '');
-            const senderName = await message.$eval('[data-testid="message-author"]', el => el.textContent).catch(() => 'Unknown');
-            
-            for (const link of links) {
-              await this.dispatchLink(link, senderName, messageText);
-            }
-          }
-          
-          this.processedMessages.add(messageId);
-        } catch (messageError) {
-          // Skip this message if we can't process it
-          console.error(`Error processing message for user ${this.userId}:`, messageError);
+      await this.notifyStatusChange();
+      
+      console.log(`WhatsApp client ready and connected for user ${this.userId}`);
+      
+    } catch (error) {
+      console.error(`Error handling ready state for user ${this.userId}:`, error);
+    }
+  }
+
+  async handleMessage(message) {
+    try {
+      // Skip if message is from status broadcast
+      if (message.from === 'status@broadcast') return;
+      
+      // Extract message content
+      const messageBody = message.body || '';
+      const messageId = message.id.id;
+      
+      // Skip if already processed
+      if (this.processedMessages.has(messageId)) return;
+      this.processedMessages.add(messageId);
+      
+      // Extract links from message
+      const links = this.extractLinks(messageBody);
+      
+      if (links.length > 0) {
+        console.log(`Found ${links.length} links in message from user ${this.userId}`);
+        
+        // Get contact info
+        const contact = await message.getContact();
+        const senderName = contact.pushname || contact.name || contact.number || 'Unknown';
+        
+        // Dispatch each link
+        for (const link of links) {
+          await this.dispatchLink(link, senderName, messageBody);
         }
       }
+      
     } catch (error) {
-      console.error(`Error in checkForNewMessages for user ${this.userId}:`, error);
+      console.error(`Error handling message for user ${this.userId}:`, error);
     }
+  }
+
+  async handleDisconnected(reason) {
+    try {
+      this.status = 'disconnected';
+      this.connected = false;
+      this.qrCode = null;
+      this.qrCodeDataURL = null;
+      
+      await this.notifyStatusChange();
+      
+      console.log(`WhatsApp client disconnected for user ${this.userId}. Reason:`, reason);
+      
+    } catch (error) {
+      console.error(`Error handling disconnection for user ${this.userId}:`, error);
+    }
+  }
+
+  extractLinks(text) {
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
+    return text.match(urlRegex) || [];
   }
 
   async dispatchLink(link, sender, messageText) {
@@ -305,23 +222,31 @@ class WhatsAppBot {
         console.log(`Link dispatched to user webhook successfully for ${this.userId}`);
       }
 
-      // Then, send to Supabase callback if configured
+      // Also send to callback URL if configured
       if (this.callbackUrl) {
         const callbackPayload = {
           type: 'link_detected',
           userId: this.userId,
           link: link,
-          message: messageText,
           sender: sender,
+          message: messageText,
           timestamp: new Date().toISOString()
         };
 
-        await axios.post(this.callbackUrl, callbackPayload, {
-          timeout: 10000,
-          headers: { 'Content-Type': 'application/json' }
-        });
+        const headers = {
+          'Content-Type': 'application/json',
+          'User-Agent': 'WhatsApp-Bot-Enhanced/1.0'
+        };
+        
+        // Add Supabase auth if service role key is available
+        if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
+          headers['Authorization'] = `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`;
+        }
 
-        console.log(`Link sent to Supabase callback for ${this.userId}`);
+        await axios.post(this.callbackUrl, callbackPayload, {
+          timeout: 5000,
+          headers
+        });
       }
 
     } catch (error) {
@@ -361,7 +286,7 @@ class WhatsAppBot {
   }
 
   async notifyQRCode() {
-    if (this.callbackUrl && this.qrCode) {
+    if (this.callbackUrl && this.qrCodeDataURL) {
       // Make webhook call non-blocking to prevent crashes
       setImmediate(async () => {
         try {
@@ -378,7 +303,7 @@ class WhatsAppBot {
           await axios.post(this.callbackUrl, {
             type: 'qr_code',
             userId: this.userId,
-            qrCode: this.qrCode,
+            qrCode: this.qrCodeDataURL,
             timestamp: new Date().toISOString()
           }, {
             timeout: 5000,
@@ -392,24 +317,24 @@ class WhatsAppBot {
   }
 
   async getQRCode() {
-    return this.qrCode;
+    return this.qrCodeDataURL;
   }
 
   // Get clean base64 QR code without data URL prefix
   getCleanBase64QR() {
-    if (!this.qrCode) return null;
+    if (!this.qrCodeDataURL) return null;
     
     // Remove data URL prefix if present
-    return this.qrCode.replace(/^data:image\/png;base64,/, '');
+    return this.qrCodeDataURL.replace(/^data:image\/png;base64,/, '');
   }
 
   // Get QR code as data URL (for direct browser display)
   getQRCodeDataURL() {
-    return this.qrCode;
+    return this.qrCodeDataURL;
   }
 
   hasQRCode() {
-    return !!this.qrCode;
+    return !!this.qrCodeDataURL;
   }
 
   getStatus() {
@@ -417,33 +342,27 @@ class WhatsAppBot {
   }
 
   isConnected() {
-    return this.connected && this.browser && !this.browser.process()?.killed;
+    return this.connected;
   }
 
   async disconnect() {
-    console.log(`Disconnecting WhatsApp bot for user ${this.userId}...`);
-    
-    this.connected = false;
-    this.status = 'disconnected';
-    
-    if (this.messageCheckInterval) {
-      clearInterval(this.messageCheckInterval);
+    try {
+      console.log(`Disconnecting WhatsApp client for user ${this.userId}...`);
+      
+      if (this.client) {
+        await this.client.destroy();
+      }
+      
+      this.connected = false;
+      this.status = 'disconnected';
+      this.qrCode = null;
+      this.qrCodeDataURL = null;
+      
+      console.log(`WhatsApp client disconnected for user ${this.userId}`);
+      
+    } catch (error) {
+      console.error(`Error disconnecting WhatsApp client for user ${this.userId}:`, error);
     }
-    
-    if (this.page) {
-      await this.page.close().catch(() => {});
-    }
-    
-    if (this.browser) {
-      await this.browser.close().catch(() => {});
-    }
-
-    // Clean up QR code file
-    if (fs.existsSync(this.qrCodePath)) {
-      fs.unlinkSync(this.qrCodePath);
-    }
-
-    await this.notifyStatusChange();
   }
 }
 
