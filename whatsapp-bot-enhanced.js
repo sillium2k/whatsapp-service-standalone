@@ -75,13 +75,17 @@ class WhatsAppBot {
       this.status = 'initializing';
       await this.notifyStatusChange();
 
-      // Start the WhatsApp client - this will trigger events
-      await this.client.initialize();
+      // Start the WhatsApp client in background - don't await
+      this.client.initialize().catch(error => {
+        console.error(`WhatsApp client initialization failed for user ${this.userId}:`, error);
+        this.status = 'error';
+        this.notifyStatusChange().catch(() => {});
+      });
       
       console.log(`WhatsApp client initialization started for user ${this.userId}`);
       
     } catch (error) {
-      console.error(`Failed to initialize WhatsApp client for user ${this.userId}:`, error);
+      console.error(`Failed to start WhatsApp client for user ${this.userId}:`, error);
       this.status = 'error';
       await this.notifyStatusChange();
       throw error;
